@@ -36,6 +36,11 @@ const chatCompletion = (content, question) => {
             content: question
         }]
     });
+    /*
+    stream: true 
+    for await (const chunk of completion) {
+        console.log(chunk.choices[0].delta.content);
+    } for the stream */
 }
 
 
