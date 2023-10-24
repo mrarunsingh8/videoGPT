@@ -7,8 +7,8 @@ const openAiLibrary = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY
 });
 
-const createTranscript = (videoId) => {
-    let inputFile = path.resolve('public', videoId);
+const createTranscript = (video) => {
+    let inputFile = path.resolve('public', video);
     return openAiLibrary.audio.transcriptions.create({
         file: fs.createReadStream(inputFile),
         model: 'whisper-1'
