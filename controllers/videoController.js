@@ -58,6 +58,7 @@ videoController.post("/ytdl", async (req, res) => {
  * @returns {Object} - {videoId, message}
  */
 videoController.post("/upload", uploadMiddleware.single('file'), async (req, res) => {
+    console.log(req.file);
     if (req.file) {
         let { filename, size, destination, mimetype } = req.file;
         let [videoId, ext] = (filename.split("."));
