@@ -31,7 +31,8 @@
     "openai": "^4.11.1",
     "pocketsphinx-continuous": "^1.1.0",
     "uuid": "^9.0.1",
-    "youtube-transcript": "^1.0.6"
+    "youtube-transcript": "^1.0.6",
+    "ytdl-core": "^4.11.5"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"

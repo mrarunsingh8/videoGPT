@@ -1,16 +1,51 @@
 const videoController = require("express").Router();
 const redisClient = require("../configs/redisClient");
-const { openAi, createTranscript, createEmbeddings, chatCompletion } = require("../libraries/openAiLibrary");
+const { createTranscript, createEmbeddings, chatCompletion } = require("../libraries/openAiLibrary");
 const pineconeLibrary = require("../libraries/pineconeLibrary");
 const uploadMiddleware = require("../middlewares/uploadMiddleware");
 const fs = require("fs");
 const path = require("path");
-
+const ytdl = require("ytdl-core");
+const uuid = require("uuid");
+const moment = require("moment");
 
 const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
 const ffmpeg = require('fluent-ffmpeg');
 ffmpeg.setFfmpegPath(ffmpegPath);
-const Psc = require('pocketsphinx-continuous');
+
+videoController.post("/ytdl", async(req, res)=>{
+    let {url} = req?.body;
+    if(url && ytdl.validateURL(url)){
+        let videoId = uuid.v4();
+        let dest = moment().format('YYYY-MM-DD');
+        const uploadDir = path.resolve('public', dest);
+        if (!fs.existsSync(uploadDir)) {
+            fs.mkdirSync(uploadDir, { recursive: true });
+        }
+        let inputFile = path.resolve('public', dest, `${videoId}.mp4`);
+        ytdl(url, {
+            quality: 'lowest',
+            filter: format => format.container === 'mp4'
+        }).pipe(fs.createWriteStream(inputFile)).on("error", (err)=>{
+            res.status(400).json({
+                err: err
+            });
+        }).on("finish", async ()=>{
+            await redisClient.hset(`video-${videoId}`, {
+                video: `${videoId}.mp4`,
+                dest: dest
+            });
+            res.status(200).json({
+                videoId: videoId,
+                message: "You tube video has been downloaded."
+            });
+        });
+    }else{
+        res.status(400).json({
+            message: "Please Enter a valid YouTube URL."
+        });
+    }
+});
 
 videoController.post("/upload", uploadMiddleware.single('file'), async (req, res) => {
     if (req.file) {
@@ -62,9 +97,6 @@ videoController.get("/transcript/:videoId", async (req, res) => {
         let textArr = (response.text).replace(/\. /g, '.\n');
         let txtFile = path.resolve("public", dest, `${videoId}.txt`);
         fs.writeFileSync(txtFile, textArr, {encoding: "utf8", flag: "w"});
-        /* await redisClient.hset(`video-${videoId}`, {
-            transcript: response.text
-        }); */
         return res.json({
             videoId: videoId,
             message: "Video transcription completed"
@@ -123,9 +155,6 @@ videoController.get("/search/:videoId", async (req, res) => {
     let embedRes = await index.query({
         vector: questionEmbedding?.data?.[0]?.embedding,
         topK: 3,
-        /* filter: {
-            id: {"$eq": `${videoId}`}
-        }, */
         includeMetadata: true,
         includeValues: true
     });
