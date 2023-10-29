@@ -7,14 +7,24 @@ const openAiLibrary = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY
 });
 
-const createTranscript = (video) => {
-    let inputFile = path.resolve('public', video);
+/**
+ * /createTranscript - create the transcript for a audio file.
+ * @param {audio} - audio file name
+ * @returns {Promise}
+ */
+const createTranscript = (audio) => {
+    let inputFile = path.resolve('public', audio);
     return openAiLibrary.audio.transcriptions.create({
         file: fs.createReadStream(inputFile),
         model: 'whisper-1'
     });
 }
 
+/**
+ * /createEmbeddings - create the embeddings for a transcript.
+ * @param {text} - text
+ * @returns {Promise}
+ */
 const createEmbeddings = (text) => {
     return openAiLibrary.embeddings.create({
         model: "text-embedding-ada-002",
@@ -24,6 +34,11 @@ const createEmbeddings = (text) => {
 }
 
 
+/**
+ * /chatCompletion - search the answer on behalf of the asked question's related text.
+ * @param {content, question} - text, question
+ * @returns {Promise}
+ */
 const chatCompletion = (content, question) => {
     return openAiLibrary.chat.completions.create({
         model: "gpt-3.5-turbo",
@@ -36,11 +51,6 @@ const chatCompletion = (content, question) => {
             content: question
         }]
     });
-    /*
-    stream: true 
-    for await (const chunk of completion) {
-        console.log(chunk.choices[0].delta.content);
-    } for the stream */
 }
 
 

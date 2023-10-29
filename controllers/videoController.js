@@ -13,9 +13,14 @@ const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
 const ffmpeg = require('fluent-ffmpeg');
 ffmpeg.setFfmpegPath(ffmpegPath);
 
-videoController.post("/ytdl", async(req, res)=>{
-    let {url} = req?.body;
-    if(url && ytdl.validateURL(url)){
+/**
+ * /ytdl - Accepts and processes an youtube URL.
+ *  @body {url} - Youtube URL
+ * @returns {Object} - {videoId, message}
+ */
+videoController.post("/ytdl", async (req, res) => {
+    let { url } = req?.body;
+    if (url && ytdl.validateURL(url)) {
         let videoId = uuid.v4();
         let dest = moment().format('YYYY-MM-DD');
         const uploadDir = path.resolve('public', dest);
@@ -26,11 +31,11 @@ videoController.post("/ytdl", async(req, res)=>{
         ytdl(url, {
             quality: 'lowest',
             filter: format => format.container === 'mp4'
-        }).pipe(fs.createWriteStream(inputFile)).on("error", (err)=>{
+        }).pipe(fs.createWriteStream(inputFile)).on("error", (err) => {
             res.status(400).json({
                 err: err
             });
-        }).on("finish", async ()=>{
+        }).on("finish", async () => {
             await redisClient.hset(`video-${videoId}`, {
                 video: `${videoId}.mp4`,
                 dest: dest
@@ -40,13 +45,18 @@ videoController.post("/ytdl", async(req, res)=>{
                 message: "You tube video has been downloaded."
             });
         });
-    }else{
+    } else {
         res.status(400).json({
             message: "Please Enter a valid YouTube URL."
         });
     }
 });
 
+/**
+ * /upload - Accepts and processes an uploaded file.
+ *  @body {file} - multipart
+ * @returns {Object} - {videoId, message}
+ */
 videoController.post("/upload", uploadMiddleware.single('file'), async (req, res) => {
     if (req.file) {
         let { filename, size, destination, mimetype } = req.file;
@@ -68,6 +78,11 @@ videoController.post("/upload", uploadMiddleware.single('file'), async (req, res
     }
 });
 
+/**
+ * /convert - convert the mp4 file to mp3.
+ * @param {videoId} - videoId
+ * @returns {Object} - {videoId, message}
+ */
 videoController.get("/convert/:videoId", async (req, res) => {
     let { videoId } = req.params;
 
@@ -89,6 +104,11 @@ videoController.get("/convert/:videoId", async (req, res) => {
     }).run();
 });
 
+/**
+ * /transcript - get the transcript for the mp3 file.
+ * @param {videoId} - videoId
+ * @returns {Object} - {videoId, message}
+ */
 videoController.get("/transcript/:videoId", async (req, res) => {
     let { videoId } = req.params;
     let audio = await redisClient.hget(`video-${videoId}`, 'audio');
@@ -96,7 +116,7 @@ videoController.get("/transcript/:videoId", async (req, res) => {
     createTranscript(`${dest}/${audio}`).then(async (response) => {
         let textArr = (response.text).replace(/\. /g, '.\n');
         let txtFile = path.resolve("public", dest, `${videoId}.txt`);
-        fs.writeFileSync(txtFile, textArr, {encoding: "utf8", flag: "w"});
+        fs.writeFileSync(txtFile, textArr, { encoding: "utf8", flag: "w" });
         return res.json({
             videoId: videoId,
             message: "Video transcription completed"
@@ -108,6 +128,11 @@ videoController.get("/transcript/:videoId", async (req, res) => {
 });
 
 
+/**
+ * /embedding - create the embeddings for the video transcript.
+ * @param {videoId} - videoId
+ * @returns {Object} - {videoId, message}
+ */
 videoController.get("/embedding/:videoId", async (req, res) => {
     let { videoId } = req.params;
     let dest = await redisClient.hget(`video-${videoId}`, 'dest');
@@ -118,7 +143,7 @@ videoController.get("/embedding/:videoId", async (req, res) => {
         let index = pineconeLibrary.index('video-gpt');
         let records = [];
         let strCounter = 0;
-        for(let chunk of textArr){
+        for (let chunk of textArr) {
             let embedingsResp = await createEmbeddings(chunk.toString());
             for (let idx of embedingsResp?.data) {
                 let embCounter = 0;
@@ -134,7 +159,7 @@ videoController.get("/embedding/:videoId", async (req, res) => {
             }
             strCounter++;
         }
-        let upStatus = await index.upsert(records);      
+        let upStatus = await index.upsert(records);
         return res.json({
             videoId: videoId,
             message: "embedding completed"
@@ -146,6 +171,12 @@ videoController.get("/embedding/:videoId", async (req, res) => {
 
 
 
+/**
+ * /search - create the embeddings for the video transcript.
+ * @param {videoId} - videoId
+ * @queryString {question} question which you want to ask related to the video?
+ * @returns {Object} - {videoId, message}
+ */
 videoController.get("/search/:videoId", async (req, res) => {
     let { videoId } = req.params;
     let { question } = req.query;
@@ -159,7 +190,7 @@ videoController.get("/search/:videoId", async (req, res) => {
         includeValues: true
     });
     let contextArr = [];
-    for(let text of embedRes?.matches){
+    for (let text of embedRes?.matches) {
         contextArr.push(text?.metadata?.text);
     }
     let context = contextArr.join(". ");
@@ -170,8 +201,5 @@ videoController.get("/search/:videoId", async (req, res) => {
         message: answer
     }).end();
 });
-
-
-
 
 module.exports = videoController;
