@@ -164,7 +164,11 @@ videoController.get("/search/:videoId", async (req, res) => {
     }
     let context = contextArr.join(". ");
     const completion = await chatCompletion(context, question);
-    res.json(completion).end();
+    const answer = completion?.choices?.[0]?.message?.content
+    res.json({
+        status: 200,
+        message: answer
+    }).end();
 });
 
 
