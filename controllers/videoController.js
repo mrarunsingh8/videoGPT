@@ -199,7 +199,9 @@ videoController.get("/search/:videoId", async (req, res) => {
     const answer = completion?.choices?.[0]?.message?.content
     res.json({
         status: 200,
-        message: answer
+        videoId: videoId,
+        question: question,
+        answer: answer
     }).end();
 });
 
