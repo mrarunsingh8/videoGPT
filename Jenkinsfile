@@ -11,6 +11,8 @@ pipeline {
     GITHUB_CREDENTIALS_ID = 'jenkins-github-ssh'
     ANTHROPIC_API_KEY     = credentials('anthropic-key')
     VULN_COUNT            = '0'
+    GIT_AUTHOR_EMAIL      = 'mrarunsingh8@gmail.com'
+    GIT_AUTHOR_NAME       = 'mrarunsingh8'
   }
 
   triggers {
@@ -51,10 +53,10 @@ pipeline {
         dir('repo') {
           checkout([
             $class: 'GitSCM',
-            branches: [[name: params.BASE_BRANCH]],
+            branches: [[name: "*/${params.BASE_BRANCH}"]],
             userRemoteConfigs: [[
               url: params.REPO_URL,
-              credentialsId: GITHUB_CREDENTIALS_ID
+              credentialsId: env.GITHUB_CREDENTIALS_ID
             ]]
           ])
         }
@@ -134,7 +136,7 @@ pipeline {
             "Audit JSON:\n${auditJson.take(8000)}"
 
           def payload = groovy.json.JsonOutput.toJson([
-            model      : 'claude-sonnet-4-6',
+            model      : 'claude-sonnet-4-5',
             max_tokens : 1024,
             temperature: 0,
             messages   : [[role: 'user', content: prompt]]
@@ -165,7 +167,7 @@ const raw = (r.content || [])
   .join('\\n');
 
 // Allowlist: letters, digits, common package/version/URL chars, pipe separator
-const safeChars = /^[a-zA-Z0-9@\/._^~\-= |]+$/;
+const safeChars = /^[a-zA-Z0-9@/._^~= |-]+$/;
 const validSeverities = new Set(['critical', 'high', 'moderate', 'low', 'info']);
 
 const seen = new Map();
@@ -216,12 +218,12 @@ NODE
             return
           }
 
-          sshagent(credentials: [GITHUB_CREDENTIALS_ID]) {
+          sshagent(credentials: [env.GITHUB_CREDENTIALS_ID]) {
             withEnv(["BASE_BRANCH=${params.BASE_BRANCH}"]) {
               dir('repo') {
                 sh '''
-git config user.email "mrarunsingh8@gmail.com"
-git config user.name "mrarunsingh8"
+git config user.email "$GIT_AUTHOR_EMAIL"
+git config user.name "$GIT_AUTHOR_NAME"
 
 ORIGIN_PATH=$(git config --get remote.origin.url | sed 's#.*github.com[:/]##; s#[.]git$##')
 git remote set-url origin git@github.com:$ORIGIN_PATH.git
@@ -255,9 +257,9 @@ while IFS= read -r LINE || [ -n "$LINE" ]; do
   echo "──────────────────────────────────────────"
   echo "Fix #${INDEX} [${SEVERITY}]: ${CMD}"
 
-  eval "$CMD" || {
+  npm install "$PKG_VER" || {
     echo "Command failed — skipping: $CMD"
-    git checkout "origin/$BASE_BRANCH" -- . 2>/dev/null || true
+    git checkout -- package.json package-lock.json 2>/dev/null || true
     continue
   }
 
@@ -290,10 +292,10 @@ ${CVE_LINE}"
 
 | Field | Value |
 |-------|-------|
-| Package | \`${PKG_VER}\` |
+| Package | \\`${PKG_VER}\\` |
 | Severity | **${SEVERITY}** |
 | CVE | ${CVE_CELL} |
-| Fix command | \`${CMD}\` |
+| Fix command | \\`${CMD}\\` |
 
 This pull request was generated automatically by the **PatchPilot** Jenkins pipeline.
 Please review the dependency diff before merging.
