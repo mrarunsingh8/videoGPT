@@ -1,0 +1,108 @@
+{
+  "fixes": [
+    {
+      "package": "form-data",
+      "current_version": "4.0.0",
+      "recommended_version": "4.0.5",
+      "fix_command": "npm install form-data@4.0.5",
+      "severity": "critical",
+      "confidence": "high"
+    },
+    {
+      "package": "express",
+      "current_version": "4.18.2",
+      "recommended_version": "4.22.1",
+      "fix_command": "npm install express@4.22.1",
+      "severity": "high",
+      "confidence": "high"
+    },
+    {
+      "package": "body-parser",
+      "current_version": "1.20.1",
+      "recommended_version": "1.20.4",
+      "fix_command": "npm install body-parser@1.20.4",
+      "severity": "high",
+      "confidence": "high"
+    },
+    {
+      "package": "braces",
+      "current_version": "3.0.2",
+      "recommended_version": "3.0.3",
+      "fix_command": "npm install braces@3.0.3",
+      "severity": "high",
+      "confidence": "high"
+    },
+    {
+      "package": "minimatch",
+      "current_version": "3.1.2",
+      "recommended_version": "3.1.5",
+      "fix_command": "npm install minimatch@3.1.5",
+      "severity": "high",
+      "confidence": "high"
+    },
+    {
+      "package": "path-to-regexp",
+      "current_version": "0.1.7",
+      "recommended_version": "0.1.13",
+      "fix_command": "npm install path-to-regexp@0.1.13",
+      "severity": "high",
+      "confidence": "high"
+    },
+    {
+      "package": "picomatch",
+      "current_version": "2.3.1",
+      "recommended_version": "2.3.2",
+      "fix_command": "npm install picomatch@2.3.2",
+      "severity": "high",
+      "confidence": "high"
+    },
+    {
+      "package": "ajv",
+      "current_version": "8.12.0",
+      "recommended_version": "8.18.0",
+      "fix_command": "npm install ajv@8.18.0",
+      "severity": "moderate",
+      "confidence": "high"
+    },
+    {
+      "package": "brace-expansion",
+      "current_version": "1.1.11",
+      "recommended_version": "1.1.13",
+      "fix_command": "npm install brace-expansion@1.1.13",
+      "severity": "moderate",
+      "confidence": "high"
+    },
+    {
+      "package": "qs",
+      "current_version": "6.11.0",
+      "recommended_version": "6.14.2",
+      "fix_command": "npm install qs@6.14.2",
+      "severity": "moderate",
+      "confidence": "high"
+    },
+    {
+      "package": "cookie",
+      "current_version": "0.5.0",
+      "recommended_version": "0.7.2",
+      "fix_command": "npm install cookie@0.7.2",
+      "severity": "low",
+      "confidence": "high"
+    },
+    {
+      "package": "send",
+      "current_version": "0.18.0",
+      "recommended_version": "0.19.2",
+      "fix_command": "npm install send@0.19.2",
+      "severity": "low",
+      "confidence": "high"
+    },
+    {
+      "package": "serve-static",
+      "current_version": "1.15.0",
+      "recommended_version": "1.16.3",
+      "fix_command": "npm install serve-static@1.16.3",
+      "severity": "low",
+      "confidence": "high"
+    }
+  ]
+}
