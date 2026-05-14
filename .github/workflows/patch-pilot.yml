@@ -4,37 +4,37 @@ name: Patch Pilot AI Remediation
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "0 2 * * *"
 
 permissions:
   contents: write
   pull-requests: write
 
+concurrency:
+  group: patch-pilot-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  NODE_OPTIONS: --max-old-space-size=4096
+
 jobs:
   remediate:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
 
-      - name: Install Dependencies
-        run: npm install
+      - run: npm ci
 
-      - name: Generate npm audit report
-        run: npm audit --json > audit.json
+      - run: npm audit --json > audit.json
         continue-on-error: true
 
-      - name: Run Patch Pilot Remediation
+      - run: node .github/scripts/patch-pilot.js
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          node .github/scripts/patch-pilot.js
