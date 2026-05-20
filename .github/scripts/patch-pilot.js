@@ -107,6 +107,9 @@ function createPR({ branchName, title, body }) {
  */
 
 function getDependencyTree() {
+  run(`npm i`, {
+    stdio: "pipe",
+  });
   const result = run(`npm ls --all --json`, {
     stdio: "pipe",
   });
@@ -151,14 +154,12 @@ function findDependencyPaths(tree, target, currentPath = [], results = []) {
  */
 
 function getInstalledVersion(packageName) {
+  console.log(`Checking installed version for ${packageName}`);
   try {
-    const result = run(`npm ls ${packageName} --json`, {
+    const result = run(`npm view ${packageName} version`, {
       stdio: "pipe",
     });
-
-    const parsed = JSON.parse(result);
-
-    return parsed.dependencies?.[packageName]?.version || null;
+    return result || null;
   } catch {
     return null;
   }
@@ -241,7 +242,7 @@ function addOverride(packageName, version) {
 
 function verifyPackageVersion(packageName, vulnerableRange) {
   const installedVersion = getInstalledVersion(packageName);
-
+  console.log(`Installed version of ${packageName}: ${installedVersion}: ${vulnerableRange}`);
   if (!installedVersion) {
     return false;
   }
@@ -310,7 +311,6 @@ async function remediate() {
 
       installPackage(packageName, safeVersion);
     } else {
-      continue;
     /**
      * -------------------------
      * TRANSITIVE DEPENDENCY
@@ -334,6 +334,8 @@ async function remediate() {
 
       const parentVersions = getAllVersions(topParent);
 
+      /* console.table(parentVersions);
+
       const safeParentVersion = parentVersions
         .filter((v) => semver.valid(v))
         .sort(semver.compare)
@@ -343,16 +345,18 @@ async function remediate() {
         log(`No safe parent version found`);
 
         continue;
-      }
+      } */
 
       remediationStrategy = "PARENT_UPGRADE";
 
-      installPackage(topParent, safeParentVersion);
+      installPackage(topParent, "latest");
 
       npmInstall();
 
       const fixed = verifyPackageVersion(packageName, vulnerableRange);
+      console.log(`Verification result for ${packageName}: ${fixed ? "fixed" : "still vulnerable"}`);
 
+      break;
       /**
        * fallback override
        */
@@ -365,6 +369,7 @@ async function remediate() {
 
         npmInstall();
       }
+      break;
     }
     /**
      * -------------------------
