@@ -366,7 +366,6 @@ async function remediate() {
         npmInstall();
       }
     }
-
     /**
      * -------------------------
      * LOCKFILE SAFETY
