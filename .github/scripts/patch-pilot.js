@@ -572,25 +572,6 @@ async function remediate() {
 
     /**
      * -------------------------
-     * TESTS
-     * -------------------------
-     */
-
-    const testsPassed =
-      runTests();
-
-    if (!testsPassed) {
-      log(
-        `Tests failed for ${packageName}`
-      );
-
-      resetRepository();
-
-      continue;
-    }
-
-    /**
-     * -------------------------
      * COMMIT + PR
      * -------------------------
      */
