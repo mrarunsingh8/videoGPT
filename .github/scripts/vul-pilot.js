@@ -280,6 +280,55 @@ function getOverrideTargetVersion(advisory, packageLock) {
 
 function getKnownPatchedVersion(packageName, advisoryId, installedVersion) {
   const knownFixes = {
+    "form-data:GHSA-fjxv-7rqg-78g4": {
+      2: "2.5.6",
+      3: "3.0.5",
+      4: "4.0.6",
+      default: "4.0.6",
+    },
+    "form-data:GHSA-hmw2-7cc7-3qxx": {
+      2: "2.5.6",
+      3: "3.0.5",
+      4: "4.0.6",
+      default: "4.0.6",
+    },
+    "braces:GHSA-grv7-fg5c-xmjg": {
+      3: "3.0.3",
+      default: null,
+    },
+    "minimatch:GHSA-3ppc-4f35-3m26": {
+      3: "3.1.4",
+      4: "4.2.5",
+      5: "5.1.8",
+      6: "6.2.2",
+      7: "7.4.8",
+      8: "8.0.6",
+      9: "9.0.7",
+      10: "10.2.3",
+      default: null,
+    },
+    "minimatch:GHSA-7r86-cg39-jmmj": {
+      3: "3.1.4",
+      4: "4.2.5",
+      5: "5.1.8",
+      6: "6.2.2",
+      7: "7.4.8",
+      8: "8.0.6",
+      9: "9.0.7",
+      10: "10.2.3",
+      default: null,
+    },
+    "minimatch:GHSA-23c5-xmqv-rm74": {
+      3: "3.1.4",
+      4: "4.2.5",
+      5: "5.1.8",
+      6: "6.2.2",
+      7: "7.4.8",
+      8: "8.0.6",
+      9: "9.0.7",
+      10: "10.2.3",
+      default: null,
+    },
     "picomatch:GHSA-c2c7-rcm5-vvqj": {
       2: "2.3.1",
       4: "4.0.3",
@@ -293,6 +342,7 @@ function getKnownPatchedVersion(packageName, advisoryId, installedVersion) {
 
   const installedMajor = extractMajor(installedVersion);
   if (installedMajor !== null && fix[installedMajor]) return fix[installedMajor];
+  if (installedMajor !== null) return null;
   return fix.default || null;
 }
 
@@ -322,6 +372,12 @@ function findTopDirectParentFromPackageLock(packageName, packageJson, packageLoc
 
     const topParent = getTopPackageFromNodePath(location);
     if (topParent && topParent !== packageName && isDirectDependency(packageJson, topParent)) {
+      return topParent;
+    }
+  }
+
+  for (const [topParent, details] of Object.entries(packageLock?.dependencies || {})) {
+    if (topParent !== packageName && isDirectDependency(packageJson, topParent) && dependencyTreeContainsPackage(details, packageName)) {
       return topParent;
     }
   }
@@ -358,7 +414,29 @@ function findInstalledPackageVersion(packageName, packageLock) {
     }
   }
 
-  return packageLock?.dependencies?.[packageName]?.version || null;
+  return findInstalledPackageVersionInDependencyTree(packageName, packageLock?.dependencies || {});
+}
+
+function findInstalledPackageVersionInDependencyTree(packageName, dependencies) {
+  for (const [dependencyName, details] of Object.entries(dependencies || {})) {
+    if (dependencyName === packageName && details?.version) {
+      return details.version;
+    }
+
+    const nestedVersion = findInstalledPackageVersionInDependencyTree(packageName, details?.dependencies || {});
+    if (nestedVersion) return nestedVersion;
+  }
+
+  return null;
+}
+
+function dependencyTreeContainsPackage(details, packageName) {
+  if (!details) return false;
+  if (details.dependencies?.[packageName]) return true;
+
+  return Object.values(details.dependencies || {}).some((nestedDetails) => (
+    dependencyTreeContainsPackage(nestedDetails, packageName)
+  ));
 }
 
 function getDirectDependencyRange(packageJson, packageName) {
