@@ -13,7 +13,7 @@ const severityRank = new Map([
   ["critical", 3],
 ]);
 
-const root = path.resolve(process.cwd(), "../../");
+const root = path.resolve(process.cwd());
 console.log(`Starting vul-pilot in ${root}`);
 const packageJsonPath = `${root}/package.json`;
 const packageLockPath = `${root}/package-lock.json`;
