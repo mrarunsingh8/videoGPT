@@ -102,7 +102,7 @@ function assertRuntime() {
 }
 
 async function attemptRemediation(plan, advisory) {
-  const branch = `security/${slugify(advisory.packageName)}-${slugify(advisory.advisoryId)}`;
+  const branch = `vulPilot/${slugify(advisory.packageName)}-${slugify(advisory.advisoryId)}`;
 
   await checkoutBase();
   await checkoutBranch(branch);
@@ -235,7 +235,7 @@ function buildPlan(advisory, packageJson) {
 }
 
 async function buildPullRequestContent({ advisory, plan, checks, diffSummary }) {
-  const fallbackTitle = `fix(security): remediate ${advisory.advisoryId} in ${advisory.packageName}`;
+  const fallbackTitle = `vulPilot: remediate ${advisory.advisoryId} in ${advisory.packageName}`;
   const risk = classifyRisk(advisory, plan);
   const validation = checks.map((check) => `- ${check.ok ? "Passed" : "Failed"}: \`${check.command}\``).join("\n");
   const fallbackBody = [
