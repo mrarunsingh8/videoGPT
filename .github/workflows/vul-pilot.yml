@@ -1,0 +1,66 @@
+name: Remediate npm Vulnerabilities
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_prs:
+        description: "Maximum remediation PRs to open in one run"
+        required: false
+        default: "3"
+      severity_threshold:
+        description: "Minimum severity to remediate: low, moderate, high, critical"
+        required: false
+        default: "moderate"
+      dry_run:
+        description: "Plan remediations without pushing branches or opening PRs"
+        required: false
+        default: "false"
+      enable_ai:
+        description: "Use OpenAI to improve PR titles and descriptions when OPENAI_API_KEY is set"
+        required: false
+        default: "true"
+  schedule:
+    - cron: "17 3 * * 1"
+
+permissions:
+  contents: write
+  pull-requests: write
+  security-events: read
+
+concurrency:
+  group: vulnerability-remediation-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  remediate:
+    name: Scan and remediate npm advisories
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Remediate vulnerabilities
+        env:
+          PATCH_GITHUB_TOKEN: ${{ secrets.PATCH_GITHUB_TOKEN }}
+          PATCH_OPENAI_API_KEY: ${{ secrets.PATCH_OPENAI_API_KEY }}
+          PATCH_GITHUB_REPOSITORY: ${{ secrets.PATCH_GITHUB_REPOSITORY }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-4.1-mini' }}
+          MAX_PRS: ${{ github.event.inputs.max_prs || '5' }}
+          SEVERITY_THRESHOLD: ${{ github.event.inputs.severity_threshold || 'moderate' }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+          ENABLE_AI: ${{ github.event.inputs.enable_ai || 'true' }}
+          BASE_BRANCH: ${{ github.ref_name }}
+        run: node .github/workflows/scripts/vul-pilot.js
