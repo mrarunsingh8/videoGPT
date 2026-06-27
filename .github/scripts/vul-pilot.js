@@ -210,21 +210,33 @@ async function applyPlan(plan, packageJson) {
 
 async function buildPlans(advisory, packageJson, packageLock) {
   if (advisory.isDirect) {
-    return compactPlans([buildDirectDependencyPlan(advisory, packageJson)]);
+    return compactPlans([await buildDirectDependencyPlan(advisory, packageJson, packageLock)]);
   }
 
   return buildNestedDependencyPlan(advisory, packageJson, packageLock);
 }
 
-function buildDirectDependencyPlan(advisory, packageJson) {
+async function buildDirectDependencyPlan(advisory, packageJson, packageLock) {
   const fix = advisory.fixAvailable;
-  if (!fix || fix === true) return null;
+  let targetVersion = null;
 
-  const targetVersion = cleanVersion(fix.version);
-  if (!targetVersion) return null;
-  if (fix.name !== advisory.packageName) return null;
-  if (Boolean(fix.isSemVerMajor)) return null;
-  if (!isSameMajorDirectBump(advisory.packageName, targetVersion, packageJson)) return null;
+  if (fix && fix !== true && fix.name === advisory.packageName && !Boolean(fix.isSemVerMajor)) {
+    targetVersion = cleanVersion(fix.version);
+  }
+
+  if (!targetVersion) {
+    targetVersion = await getLowestSafeSameMajorVersion(
+      advisory.packageName,
+      findDirectOrInstalledVersion(advisory.packageName, packageJson, packageLock),
+      advisory.range,
+    );
+  }
+
+  if (!targetVersion) {
+    targetVersion = await getLatestSameMajorDirectVersion(advisory.packageName, packageJson, packageLock);
+  }
+
+  if (!targetVersion || !isSameMajorDirectBump(advisory.packageName, targetVersion, packageJson)) return null;
 
   return {
     type: "direct-upgrade",
@@ -241,7 +253,7 @@ function compactPlans(plans) {
 
 async function buildNestedDependencyPlan(advisory, packageJson, packageLock) {
   const parentPlan = await buildTopParentBumpPlan(advisory, packageJson, packageLock);
-  const overridePlan = buildOverridePlan(advisory, packageLock);
+  const overridePlan = await buildOverridePlan(advisory, packageLock);
 
   return compactPlans([
     parentPlan && !parentPlan.isSemVerMajor && isSameMajorParentBump(parentPlan, packageJson)
@@ -283,8 +295,8 @@ async function buildTopParentBumpPlan(advisory, packageJson, packageLock) {
   };
 }
 
-function buildOverridePlan(advisory, packageLock) {
-  const targetVersion = getOverrideTargetVersion(advisory, packageLock);
+async function buildOverridePlan(advisory, packageLock) {
+  const targetVersion = await getOverrideTargetVersion(advisory, packageLock);
   if (!targetVersion) return null;
 
   return {
@@ -296,7 +308,7 @@ function buildOverridePlan(advisory, packageLock) {
   };
 }
 
-function getOverrideTargetVersion(advisory, packageLock) {
+async function getOverrideTargetVersion(advisory, packageLock) {
   const fix = advisory.fixAvailable;
   const installedVersion = findInstalledPackageVersion(advisory.packageName, packageLock);
 
@@ -305,98 +317,10 @@ function getOverrideTargetVersion(advisory, packageLock) {
     if (isSameMajorVersion(installedVersion, fixVersion)) return fixVersion;
   }
 
-  const rangeVersion = getPatchedVersionFromAdvisoryRange(advisory, installedVersion);
-  if (rangeVersion) return rangeVersion;
+  const safeRangeVersion = await getLowestSafeSameMajorVersion(advisory.packageName, installedVersion, advisory.range);
+  if (safeRangeVersion) return safeRangeVersion;
 
-  return getKnownPatchedVersion(advisory.packageName, advisory.advisoryId, installedVersion);
-}
-
-function getPatchedVersionFromAdvisoryRange(advisory, installedVersion) {
-  const installedMajor = extractMajor(installedVersion);
-  if (installedMajor === null || !advisory.range) return null;
-
-  const lessThanMatch = advisory.range.match(/<\s*(\d+\.\d+\.\d+)/);
-  if (lessThanMatch && extractMajor(lessThanMatch[1]) === installedMajor) {
-    return lessThanMatch[1];
-  }
-
-  const lessThanOrEqualMatch = advisory.range.match(/<=\s*(\d+)\.(\d+)\.(\d+)/);
-  if (lessThanOrEqualMatch) {
-    const [, major, minor, patch] = lessThanOrEqualMatch;
-    if (Number.parseInt(major, 10) === installedMajor) {
-      return `${major}.${minor}.${Number.parseInt(patch, 10) + 1}`;
-    }
-  }
-
-  return null;
-}
-
-function getKnownPatchedVersion(packageName, advisoryId, installedVersion) {
-  const knownFixes = {
-    "form-data:GHSA-fjxv-7rqg-78g4": {
-      2: "2.5.6",
-      3: "3.0.5",
-      4: "4.0.6",
-      default: "4.0.6",
-    },
-    "form-data:GHSA-hmw2-7cc7-3qxx": {
-      2: "2.5.6",
-      3: "3.0.5",
-      4: "4.0.6",
-      default: "4.0.6",
-    },
-    "braces:GHSA-grv7-fg5c-xmjg": {
-      3: "3.0.3",
-      default: null,
-    },
-    "minimatch:GHSA-3ppc-4f35-3m26": {
-      3: "3.1.4",
-      4: "4.2.5",
-      5: "5.1.8",
-      6: "6.2.2",
-      7: "7.4.8",
-      8: "8.0.6",
-      9: "9.0.7",
-      10: "10.2.3",
-      default: null,
-    },
-    "minimatch:GHSA-7r86-cg39-jmmj": {
-      3: "3.1.4",
-      4: "4.2.5",
-      5: "5.1.8",
-      6: "6.2.2",
-      7: "7.4.8",
-      8: "8.0.6",
-      9: "9.0.7",
-      10: "10.2.3",
-      default: null,
-    },
-    "minimatch:GHSA-23c5-xmqv-rm74": {
-      3: "3.1.4",
-      4: "4.2.5",
-      5: "5.1.8",
-      6: "6.2.2",
-      7: "7.4.8",
-      8: "8.0.6",
-      9: "9.0.7",
-      10: "10.2.3",
-      default: null,
-    },
-    "picomatch:GHSA-c2c7-rcm5-vvqj": {
-      2: "2.3.1",
-      4: "4.0.3",
-      default: "4.0.3",
-    },
-  };
-
-  const fix = knownFixes[`${packageName}:${advisoryId}`];
-  if (!fix) return null;
-  if (typeof fix === "string") return fix;
-
-  const installedMajor = extractMajor(installedVersion);
-  if (installedMajor !== null && fix[installedMajor]) return fix[installedMajor];
-  if (installedMajor !== null) return null;
-  return fix.default || null;
+  return getLatestSameMajorPackageVersion(advisory.packageName, installedVersion);
 }
 
 function findTopDirectParent(advisory, packageJson, packageLock) {
@@ -479,24 +403,54 @@ function isSameMajorParentBump(plan, packageJson) {
 
 async function getLatestSameMajorVersion(packageName, packageJson) {
   const currentRange = getDirectDependencyRange(packageJson, packageName);
-  const currentMajor = extractMajor(currentRange);
+  return getLatestSameMajorPackageVersion(packageName, currentRange);
+}
+
+async function getLatestSameMajorDirectVersion(packageName, packageJson, packageLock) {
+  return getLatestSameMajorPackageVersion(
+    packageName,
+    findDirectOrInstalledVersion(packageName, packageJson, packageLock),
+  );
+}
+
+async function getLowestSafeSameMajorVersion(packageName, currentVersionOrRange, vulnerableRange) {
+  const currentMajor = extractMajor(currentVersionOrRange);
+  if (currentMajor === null || !vulnerableRange) return null;
+
+  const versions = await getPublishedVersions(packageName);
+  const safeVersions = versions
+    .filter((version) => extractMajor(version) === currentMajor)
+    .filter((version) => isVersionGreaterThanRange(version, currentVersionOrRange))
+    .filter((version) => !satisfiesRange(version, vulnerableRange))
+    .sort(compareVersions);
+
+  return safeVersions[0] || null;
+}
+
+async function getLatestSameMajorPackageVersion(packageName, currentVersionOrRange) {
+  const currentMajor = extractMajor(currentVersionOrRange);
   if (currentMajor === null) return null;
 
-  const result = await run("npm", ["view", `${packageName}@${currentMajor}`, "version", "--json"], {
-    allowFailure: true,
-    env: { ...process.env, npm_config_audit: "false", npm_config_fund: "false" },
-  });
-  if (result.code !== 0 || !result.stdout.trim()) return null;
-
-  const versions = parseNpmViewVersions(result.stdout);
+  const versions = await getPublishedVersions(packageName);
   const latestSameMajor = versions
     .filter((version) => extractMajor(version) === currentMajor)
     .sort(compareVersions)
     .at(-1);
 
   if (!latestSameMajor) return null;
-  if (!isVersionGreaterThanRange(latestSameMajor, currentRange)) return null;
+  if (!isVersionGreaterThanRange(latestSameMajor, currentVersionOrRange)) return null;
   return latestSameMajor;
+}
+
+async function getPublishedVersions(packageName) {
+  const result = await run("npm", ["view", packageName, "versions", "--json"], {
+    allowFailure: true,
+    env: { ...process.env, npm_config_audit: "false", npm_config_fund: "false" },
+  });
+  if (result.code !== 0 || !result.stdout.trim()) return [];
+
+  const versions = parseNpmViewVersions(result.stdout);
+  return versions.filter((version) => /^\d+\.\d+\.\d+/.test(version));
 }
 
 function parseNpmViewVersions(stdout) {
@@ -512,6 +466,81 @@ function isVersionGreaterThanRange(version, range) {
   const current = cleanVersion(range);
   if (!current) return true;
   return compareVersions(current, version) < 0;
+}
+
+function satisfiesRange(version, range) {
+  const alternatives = String(range || "")
+    .split("||")
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (alternatives.length === 0) return false;
+  return alternatives.some((alternative) => satisfiesComparatorSet(version, alternative));
+}
+
+function satisfiesComparatorSet(version, rangePart) {
+  const comparators = normalizeComparatorSet(rangePart);
+  if (comparators.length === 0) return false;
+
+  return comparators.every((comparator) => satisfiesComparator(version, comparator));
+}
+
+function normalizeComparatorSet(rangePart) {
+  const trimmed = String(rangePart || "").trim();
+  const hyphen = trimmed.match(/^(\d+(?:\.\d+){0,2})\s+-\s+(\d+(?:\.\d+){0,2})$/);
+  if (hyphen) {
+    return [`>=${normalizeVersion(hyphen[1])}`, `<=${normalizeVersion(hyphen[2])}`];
+  }
+
+  return trimmed
+    .split(/\s+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .flatMap((item) => expandComparator(item));
+}
+
+function expandComparator(comparator) {
+  const match = comparator.match(/^(<=|>=|<|>|=|~|\^)?\s*(\d+(?:\.\d+){0,2})$/);
+  if (!match) return [];
+
+  const operator = match[1] || "=";
+  const version = normalizeVersion(match[2]);
+
+  if (operator === "^") {
+    const major = extractMajor(version);
+    if (major === null) return [];
+    return [`>=${version}`, `<${major + 1}.0.0`];
+  }
+
+  if (operator === "~") {
+    const [major, minor] = version.split(".").map((part) => Number.parseInt(part, 10) || 0);
+    return [`>=${version}`, `<${major}.${minor + 1}.0`];
+  }
+
+  return [`${operator}${version}`];
+}
+
+function satisfiesComparator(version, comparator) {
+  const match = comparator.match(/^(<=|>=|<|>|=)(\d+\.\d+\.\d+)$/);
+  if (!match) return false;
+
+  const [, operator, target] = match;
+  const comparison = compareVersions(version, target);
+
+  if (operator === "<") return comparison < 0;
+  if (operator === "<=") return comparison <= 0;
+  if (operator === ">") return comparison > 0;
+  if (operator === ">=") return comparison >= 0;
+  return comparison === 0;
+}
+
+function normalizeVersion(version) {
+  const parts = String(version || "")
+    .split(".")
+    .map((part) => Number.parseInt(part, 10) || 0);
+
+  while (parts.length < 3) parts.push(0);
+  return parts.slice(0, 3).join(".");
 }
 
 function compareVersions(left, right) {
@@ -579,6 +608,11 @@ function getDirectDependencyRange(packageJson, packageName) {
     || packageJson.devDependencies?.[packageName]
     || packageJson.optionalDependencies?.[packageName]
     || null;
+}
+
+function findDirectOrInstalledVersion(packageName, packageJson, packageLock) {
+  return getDirectDependencyRange(packageJson, packageName)
+    || findInstalledPackageVersion(packageName, packageLock);
 }
 
 function getDirectDependencyNames(packageJson) {
