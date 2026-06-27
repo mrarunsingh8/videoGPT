@@ -22,7 +22,7 @@ const openaiApiKey = process.env.PATCH_OPENAI_API_KEY;
 const openaiModel = process.env.OPENAI_MODEL || "gpt-4.1-mini";
 const enableAi = parseBoolean(process.env.ENABLE_AI, true) && Boolean(openaiApiKey);
 const dryRun = parseBoolean(process.env.DRY_RUN, false);
-const maxPrs = parsePositiveInt(process.env.MAX_PRS, 1);
+const maxPrs = parsePositiveInt(process.env.MAX_PRS, 5);
 const severityThreshold = normalizeSeverity(process.env.SEVERITY_THRESHOLD || "moderate");
 const baseBranch = process.env.BASE_BRANCH || process.env.GITHUB_REF_NAME || "main";
 const repository = process.env.PATCH_GITHUB_REPOSITORY;
@@ -61,13 +61,13 @@ async function main() {
 
     console.log(`\n---\nPlanning remediation for ${advisory.packageName}: ${advisory.title}`);
 
-    const plan = await buildPlan(advisory, packageJson, packageLock);
-    if (!plan) {
+    const plans = await buildPlans(advisory, packageJson, packageLock);
+    if (plans.length === 0) {
       console.log(`Skipping ${advisory.key}: no targeted npm remediation could be derived.`);
       continue;
     }
 
-    const result = await attemptRemediation(plan, advisory);
+    const result = await attemptRemediationPlans(plans, advisory);
     if (!result.success) {
       console.log(`Skipping PR for ${advisory.key}: ${result.reason}`);
       continue;
@@ -85,6 +85,20 @@ async function main() {
   }
 
   console.log(`\nCompleted. Opened or updated ${opened} remediation PR(s).`);
+}
+
+async function attemptRemediationPlans(plans, advisory) {
+  let lastFailure = "no remediation plan was attempted";
+
+  for (const plan of plans) {
+    console.log(`Trying ${plan.type}: ${plan.explanation}`);
+    const result = await attemptRemediation(plan, advisory);
+    if (result.success) return result;
+    lastFailure = `${plan.type} failed: ${result.reason}`;
+    console.log(`Plan did not remediate ${advisory.key}: ${lastFailure}`);
+  }
+
+  return { success: false, reason: lastFailure };
 }
 
 function assertRuntime() {
@@ -194,9 +208,9 @@ async function applyPlan(plan, packageJson) {
   return false;
 }
 
-async function buildPlan(advisory, packageJson, packageLock) {
+async function buildPlans(advisory, packageJson, packageLock) {
   if (advisory.isDirect) {
-    return buildDirectDependencyPlan(advisory, packageJson);
+    return compactPlans([buildDirectDependencyPlan(advisory, packageJson)]);
   }
 
   return buildNestedDependencyPlan(advisory, packageJson, packageLock);
@@ -221,16 +235,20 @@ function buildDirectDependencyPlan(advisory, packageJson) {
   };
 }
 
+function compactPlans(plans) {
+  return plans.filter(Boolean);
+}
+
 async function buildNestedDependencyPlan(advisory, packageJson, packageLock) {
   const parentPlan = await buildTopParentBumpPlan(advisory, packageJson, packageLock);
-  if (parentPlan && !parentPlan.isSemVerMajor && isSameMajorParentBump(parentPlan, packageJson)) {
-    return parentPlan;
-  }
-
   const overridePlan = buildOverridePlan(advisory, packageLock);
-  if (overridePlan) return overridePlan;
 
-  return null;
+  return compactPlans([
+    parentPlan && !parentPlan.isSemVerMajor && isSameMajorParentBump(parentPlan, packageJson)
+      ? parentPlan
+      : null,
+    overridePlan,
+  ]);
 }
 
 async function buildTopParentBumpPlan(advisory, packageJson, packageLock) {
@@ -287,7 +305,30 @@ function getOverrideTargetVersion(advisory, packageLock) {
     if (isSameMajorVersion(installedVersion, fixVersion)) return fixVersion;
   }
 
+  const rangeVersion = getPatchedVersionFromAdvisoryRange(advisory, installedVersion);
+  if (rangeVersion) return rangeVersion;
+
   return getKnownPatchedVersion(advisory.packageName, advisory.advisoryId, installedVersion);
+}
+
+function getPatchedVersionFromAdvisoryRange(advisory, installedVersion) {
+  const installedMajor = extractMajor(installedVersion);
+  if (installedMajor === null || !advisory.range) return null;
+
+  const lessThanMatch = advisory.range.match(/<\s*(\d+\.\d+\.\d+)/);
+  if (lessThanMatch && extractMajor(lessThanMatch[1]) === installedMajor) {
+    return lessThanMatch[1];
+  }
+
+  const lessThanOrEqualMatch = advisory.range.match(/<=\s*(\d+)\.(\d+)\.(\d+)/);
+  if (lessThanOrEqualMatch) {
+    const [, major, minor, patch] = lessThanOrEqualMatch;
+    if (Number.parseInt(major, 10) === installedMajor) {
+      return `${major}.${minor}.${Number.parseInt(patch, 10) + 1}`;
+    }
+  }
+
+  return null;
 }
 
 function getKnownPatchedVersion(packageName, advisoryId, installedVersion) {
