@@ -6,7 +6,7 @@ on:
       max_prs:
         description: "Maximum remediation PRs to open in one run"
         required: false
-        default: "3"
+        default: "1"
       severity_threshold:
         description: "Minimum severity to remediate: low, moderate, high, critical"
         required: false
@@ -58,8 +58,7 @@ jobs:
           PATCH_OPENAI_API_KEY: ${{ secrets.PATCH_OPENAI_API_KEY }}
           PATCH_GITHUB_REPOSITORY: ${{ secrets.PATCH_GITHUB_REPOSITORY }}
           OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-4.1-mini' }}
-          MAX_PRS: 1
-          ##'1' || github.event.inputs.max_prs || '3'
+          MAX_PRS: ${{ github.event.inputs.max_prs || '3' }}
           SEVERITY_THRESHOLD: ${{ github.event.inputs.severity_threshold || 'moderate' }}
           DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
           ENABLE_AI: ${{ github.event.inputs.enable_ai || 'true' }}
