@@ -63,4 +63,4 @@ jobs:
           DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
           ENABLE_AI: ${{ github.event.inputs.enable_ai || 'true' }}
           BASE_BRANCH: ${{ github.ref_name }}
-        run: node .github/workflows/scripts/vul-pilot.js
+        run: node .github/scripts/vul-pilot.js
