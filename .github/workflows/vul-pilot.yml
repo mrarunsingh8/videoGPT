@@ -58,7 +58,7 @@ jobs:
           PATCH_OPENAI_API_KEY: ${{ secrets.PATCH_OPENAI_API_KEY }}
           PATCH_GITHUB_REPOSITORY: ${{ secrets.PATCH_GITHUB_REPOSITORY }}
           OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-4.1-mini' }}
-          MAX_PRS: ${{ github.event.inputs.max_prs || '5' }}
+          MAX_PRS: ${{ github.event.inputs.max_prs || '1' }}
           SEVERITY_THRESHOLD: ${{ github.event.inputs.severity_threshold || 'moderate' }}
           DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
           ENABLE_AI: ${{ github.event.inputs.enable_ai || 'true' }}
