@@ -36,6 +36,7 @@ async function main() {
   assertRuntime();
 
   const packageJson = await readPackageJson();
+  const packageLock = await readPackageLock();
   await configureGit();
 
   const audit = await npmAudit();
@@ -60,7 +61,7 @@ async function main() {
 
     console.log(`\n---\nPlanning remediation for ${advisory.packageName}: ${advisory.title}`);
 
-    const plan = buildPlan(advisory, packageJson);
+    const plan = buildPlan(advisory, packageJson, packageLock);
     if (!plan) {
       console.log(`Skipping ${advisory.key}: no targeted npm remediation could be derived.`);
       continue;
@@ -193,45 +194,204 @@ async function applyPlan(plan, packageJson) {
   return false;
 }
 
-function buildPlan(advisory, packageJson) {
+function buildPlan(advisory, packageJson, packageLock) {
+  if (advisory.isDirect) {
+    return buildDirectDependencyPlan(advisory, packageJson);
+  }
+
+  return buildNestedDependencyPlan(advisory, packageJson, packageLock);
+}
+
+function buildDirectDependencyPlan(advisory, packageJson) {
   const fix = advisory.fixAvailable;
   if (!fix || fix === true) return null;
 
   const targetVersion = cleanVersion(fix.version);
   if (!targetVersion) return null;
+  if (fix.name !== advisory.packageName) return null;
+  if (Boolean(fix.isSemVerMajor)) return null;
+  if (!isSameMajorDirectBump(advisory.packageName, targetVersion, packageJson)) return null;
 
-  if (isDirectDependency(packageJson, advisory.packageName) && fix.name === advisory.packageName) {
-    return {
-      type: "direct-upgrade",
-      packageName: advisory.packageName,
-      targetVersion,
-      isSemVerMajor: Boolean(fix.isSemVerMajor),
-      explanation: `Upgrade direct dependency ${advisory.packageName} to ${targetVersion}.`,
-    };
+  return {
+    type: "direct-upgrade",
+    packageName: advisory.packageName,
+    targetVersion,
+    isSemVerMajor: false,
+    explanation: `Upgrade direct dependency ${advisory.packageName} to ${targetVersion}.`,
+  };
+}
+
+function buildNestedDependencyPlan(advisory, packageJson, packageLock) {
+  const parentPlan = buildTopParentBumpPlan(advisory, packageJson, packageLock);
+  if (parentPlan && !parentPlan.isSemVerMajor && isSameMajorParentBump(parentPlan, packageJson)) {
+    return parentPlan;
   }
 
-  if (fix.name && fix.name !== advisory.packageName && isDirectDependency(packageJson, fix.name)) {
-    return {
-      type: "parent-upgrade",
-      packageName: advisory.packageName,
-      parentName: fix.name,
-      targetVersion,
-      isSemVerMajor: Boolean(fix.isSemVerMajor),
-      explanation: `Upgrade parent dependency ${fix.name} to ${targetVersion} to remediate ${advisory.packageName}.`,
-    };
+  const overridePlan = buildOverridePlan(advisory, packageLock);
+  if (overridePlan) return overridePlan;
+
+  return null;
+}
+
+function buildTopParentBumpPlan(advisory, packageJson, packageLock) {
+  const fix = advisory.fixAvailable;
+  if (!fix || fix === true) return null;
+
+  const topParent = findTopDirectParent(advisory, packageJson, packageLock);
+  if (!topParent || fix.name !== topParent) return null;
+
+  const targetVersion = cleanVersion(fix.version);
+  if (!targetVersion) return null;
+
+  return {
+    type: "parent-upgrade",
+    packageName: advisory.packageName,
+    parentName: topParent,
+    targetVersion,
+    isSemVerMajor: Boolean(fix.isSemVerMajor),
+    explanation: `Upgrade top-level parent dependency ${topParent} to ${targetVersion} to remediate nested vulnerability in ${advisory.packageName}.`,
+  };
+}
+
+function buildOverridePlan(advisory, packageLock) {
+  const targetVersion = getOverrideTargetVersion(advisory, packageLock);
+  if (!targetVersion) return null;
+
+  return {
+    type: "override",
+    packageName: advisory.packageName,
+    targetVersion,
+    isSemVerMajor: false,
+    explanation: `Apply npm override for nested dependency ${advisory.packageName}@${targetVersion}.`,
+  };
+}
+
+function getOverrideTargetVersion(advisory, packageLock) {
+  const fix = advisory.fixAvailable;
+  const installedVersion = findInstalledPackageVersion(advisory.packageName, packageLock);
+
+  if (fix && fix !== true && fix.name === advisory.packageName) {
+    const fixVersion = cleanVersion(fix.version);
+    if (isSameMajorVersion(installedVersion, fixVersion)) return fixVersion;
   }
 
-  if (fix.name === advisory.packageName) {
-    return {
-      type: "override",
-      packageName: advisory.packageName,
-      targetVersion,
-      isSemVerMajor: Boolean(fix.isSemVerMajor),
-      explanation: `Add npm override for transitive dependency ${advisory.packageName}@${targetVersion}.`,
-    };
+  return getKnownPatchedVersion(advisory.packageName, advisory.advisoryId, installedVersion);
+}
+
+function getKnownPatchedVersion(packageName, advisoryId, installedVersion) {
+  const knownFixes = {
+    "picomatch:GHSA-c2c7-rcm5-vvqj": {
+      2: "2.3.1",
+      4: "4.0.3",
+      default: "4.0.3",
+    },
+  };
+
+  const fix = knownFixes[`${packageName}:${advisoryId}`];
+  if (!fix) return null;
+  if (typeof fix === "string") return fix;
+
+  const installedMajor = extractMajor(installedVersion);
+  if (installedMajor !== null && fix[installedMajor]) return fix[installedMajor];
+  return fix.default || null;
+}
+
+function findTopDirectParent(advisory, packageJson, packageLock) {
+  for (const node of advisory.nodes || []) {
+    const topParent = getTopPackageFromNodePath(node);
+    if (topParent && topParent !== advisory.packageName && isDirectDependency(packageJson, topParent)) {
+      return topParent;
+    }
+  }
+
+  const lockParent = findTopDirectParentFromPackageLock(advisory.packageName, packageJson, packageLock);
+  if (lockParent) return lockParent;
+
+  const fix = advisory.fixAvailable;
+  if (fix && fix !== true && isDirectDependency(packageJson, fix.name)) {
+    return fix.name;
   }
 
   return null;
+}
+
+function findTopDirectParentFromPackageLock(packageName, packageJson, packageLock) {
+  const packages = packageLock?.packages || {};
+  for (const location of Object.keys(packages)) {
+    if (getLeafPackageFromNodePath(location) !== packageName) continue;
+
+    const topParent = getTopPackageFromNodePath(location);
+    if (topParent && topParent !== packageName && isDirectDependency(packageJson, topParent)) {
+      return topParent;
+    }
+  }
+
+  return null;
+}
+
+function isSameMajorParentBump(plan, packageJson) {
+  return isSameMajorDirectBump(plan.parentName, plan.targetVersion, packageJson);
+}
+
+function isSameMajorDirectBump(packageName, targetVersion, packageJson) {
+  const currentRange = getDirectDependencyRange(packageJson, packageName);
+  const currentMajor = extractMajor(currentRange);
+  const targetMajor = extractMajor(targetVersion);
+
+  if (currentMajor === null || targetMajor === null) return true;
+  return currentMajor === targetMajor;
+}
+
+function isSameMajorVersion(currentVersion, targetVersion) {
+  const currentMajor = extractMajor(currentVersion);
+  const targetMajor = extractMajor(targetVersion);
+
+  if (currentMajor === null || targetMajor === null) return true;
+  return currentMajor === targetMajor;
+}
+
+function findInstalledPackageVersion(packageName, packageLock) {
+  const packages = packageLock?.packages || {};
+  for (const [location, details] of Object.entries(packages)) {
+    if (getLeafPackageFromNodePath(location) === packageName && details?.version) {
+      return details.version;
+    }
+  }
+
+  return packageLock?.dependencies?.[packageName]?.version || null;
+}
+
+function getDirectDependencyRange(packageJson, packageName) {
+  return packageJson.dependencies?.[packageName]
+    || packageJson.devDependencies?.[packageName]
+    || packageJson.optionalDependencies?.[packageName]
+    || null;
+}
+
+function extractMajor(versionOrRange) {
+  const match = String(versionOrRange || "").match(/\d+/);
+  return match ? Number.parseInt(match[0], 10) : null;
+}
+
+function getTopPackageFromNodePath(nodePath) {
+  const packages = getPackageNamesFromNodePath(nodePath);
+  return packages[0] || null;
+}
+
+function getLeafPackageFromNodePath(nodePath) {
+  const packages = getPackageNamesFromNodePath(nodePath);
+  return packages[packages.length - 1] || null;
+}
+
+function getPackageNamesFromNodePath(nodePath) {
+  const parts = String(nodePath || "").split("/node_modules/");
+  const first = parts[0].startsWith("node_modules/") ? parts[0].slice("node_modules/".length) : parts[0];
+  const candidates = [first, ...parts.slice(1)].filter(Boolean);
+  return candidates.map((candidate) => {
+    const segments = candidate.split("/").filter(Boolean);
+    if (segments[0]?.startsWith("@") && segments[1]) return `${segments[0]}/${segments[1]}`;
+    return segments[0] || null;
+  }).filter(Boolean);
 }
 
 async function buildPullRequestContent({ advisory, plan, checks, diffSummary }) {
@@ -585,6 +745,10 @@ function isDirectDependency(packageJson, packageName) {
 
 async function readPackageJson() {
   return JSON.parse(await readFile(packageJsonPath, "utf8"));
+}
+
+async function readPackageLock() {
+  return JSON.parse(await readFile(packageLockPath, "utf8"));
 }
 
 async function writePackageJson(packageJson) {
