@@ -61,7 +61,7 @@ async function main() {
 
     console.log(`\n---\nPlanning remediation for ${advisory.packageName}: ${advisory.title}`);
 
-    const plan = buildPlan(advisory, packageJson, packageLock);
+    const plan = await buildPlan(advisory, packageJson, packageLock);
     if (!plan) {
       console.log(`Skipping ${advisory.key}: no targeted npm remediation could be derived.`);
       continue;
@@ -194,7 +194,7 @@ async function applyPlan(plan, packageJson) {
   return false;
 }
 
-function buildPlan(advisory, packageJson, packageLock) {
+async function buildPlan(advisory, packageJson, packageLock) {
   if (advisory.isDirect) {
     return buildDirectDependencyPlan(advisory, packageJson);
   }
@@ -221,8 +221,8 @@ function buildDirectDependencyPlan(advisory, packageJson) {
   };
 }
 
-function buildNestedDependencyPlan(advisory, packageJson, packageLock) {
-  const parentPlan = buildTopParentBumpPlan(advisory, packageJson, packageLock);
+async function buildNestedDependencyPlan(advisory, packageJson, packageLock) {
+  const parentPlan = await buildTopParentBumpPlan(advisory, packageJson, packageLock);
   if (parentPlan && !parentPlan.isSemVerMajor && isSameMajorParentBump(parentPlan, packageJson)) {
     return parentPlan;
   }
@@ -233,14 +233,26 @@ function buildNestedDependencyPlan(advisory, packageJson, packageLock) {
   return null;
 }
 
-function buildTopParentBumpPlan(advisory, packageJson, packageLock) {
+async function buildTopParentBumpPlan(advisory, packageJson, packageLock) {
   const fix = advisory.fixAvailable;
-  if (!fix || fix === true) return null;
-
   const topParent = findTopDirectParent(advisory, packageJson, packageLock);
-  if (!topParent || fix.name !== topParent) return null;
+  if (!topParent) return null;
 
-  const targetVersion = cleanVersion(fix.version);
+  if (fix && fix !== true && fix.name === topParent) {
+    const targetVersion = cleanVersion(fix.version);
+    if (!targetVersion) return null;
+
+    return {
+      type: "parent-upgrade",
+      packageName: advisory.packageName,
+      parentName: topParent,
+      targetVersion,
+      isSemVerMajor: Boolean(fix.isSemVerMajor),
+      explanation: `Upgrade top-level parent dependency ${topParent} to ${targetVersion} to remediate nested vulnerability in ${advisory.packageName}.`,
+    };
+  }
+
+  const targetVersion = await getLatestSameMajorVersion(topParent, packageJson);
   if (!targetVersion) return null;
 
   return {
@@ -248,7 +260,7 @@ function buildTopParentBumpPlan(advisory, packageJson, packageLock) {
     packageName: advisory.packageName,
     parentName: topParent,
     targetVersion,
-    isSemVerMajor: Boolean(fix.isSemVerMajor),
+    isSemVerMajor: false,
     explanation: `Upgrade top-level parent dependency ${topParent} to ${targetVersion} to remediate nested vulnerability in ${advisory.packageName}.`,
   };
 }
@@ -376,6 +388,12 @@ function findTopDirectParentFromPackageLock(packageName, packageJson, packageLoc
     }
   }
 
+  for (const topParent of getDirectDependencyNames(packageJson)) {
+    if (topParent !== packageName && packageGraphContainsPackage(packageLock, `node_modules/${topParent}`, packageName)) {
+      return topParent;
+    }
+  }
+
   for (const [topParent, details] of Object.entries(packageLock?.dependencies || {})) {
     if (topParent !== packageName && isDirectDependency(packageJson, topParent) && dependencyTreeContainsPackage(details, packageName)) {
       return topParent;
@@ -385,8 +403,84 @@ function findTopDirectParentFromPackageLock(packageName, packageJson, packageLoc
   return null;
 }
 
+function packageGraphContainsPackage(packageLock, startLocation, packageName, seen = new Set()) {
+  if (!packageLock?.packages || seen.has(startLocation)) return false;
+  seen.add(startLocation);
+
+  const details = packageLock.packages[startLocation];
+  if (!details?.dependencies) return false;
+
+  for (const dependencyName of Object.keys(details.dependencies)) {
+    if (dependencyName === packageName) return true;
+
+    const dependencyLocation = resolvePackageLockLocation(packageLock, startLocation, dependencyName);
+    if (dependencyLocation && packageGraphContainsPackage(packageLock, dependencyLocation, packageName, seen)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function resolvePackageLockLocation(packageLock, parentLocation, dependencyName) {
+  const nestedLocation = `${parentLocation}/node_modules/${dependencyName}`;
+  if (packageLock.packages?.[nestedLocation]) return nestedLocation;
+
+  const hoistedLocation = `node_modules/${dependencyName}`;
+  if (packageLock.packages?.[hoistedLocation]) return hoistedLocation;
+
+  return null;
+}
+
 function isSameMajorParentBump(plan, packageJson) {
   return isSameMajorDirectBump(plan.parentName, plan.targetVersion, packageJson);
+}
+
+async function getLatestSameMajorVersion(packageName, packageJson) {
+  const currentRange = getDirectDependencyRange(packageJson, packageName);
+  const currentMajor = extractMajor(currentRange);
+  if (currentMajor === null) return null;
+
+  const result = await run("npm", ["view", `${packageName}@${currentMajor}`, "version", "--json"], {
+    allowFailure: true,
+    env: { ...process.env, npm_config_audit: "false", npm_config_fund: "false" },
+  });
+  if (result.code !== 0 || !result.stdout.trim()) return null;
+
+  const versions = parseNpmViewVersions(result.stdout);
+  const latestSameMajor = versions
+    .filter((version) => extractMajor(version) === currentMajor)
+    .sort(compareVersions)
+    .at(-1);
+
+  if (!latestSameMajor) return null;
+  if (!isVersionGreaterThanRange(latestSameMajor, currentRange)) return null;
+  return latestSameMajor;
+}
+
+function parseNpmViewVersions(stdout) {
+  try {
+    const parsed = JSON.parse(stdout);
+    return Array.isArray(parsed) ? parsed : [parsed].filter(Boolean);
+  } catch {
+    return stdout.split(/\s+/).map((item) => item.trim()).filter(Boolean);
+  }
+}
+
+function isVersionGreaterThanRange(version, range) {
+  const current = cleanVersion(range);
+  if (!current) return true;
+  return compareVersions(current, version) < 0;
+}
+
+function compareVersions(left, right) {
+  const leftParts = String(left).split(".").map((part) => Number.parseInt(part, 10) || 0);
+  const rightParts = String(right).split(".").map((part) => Number.parseInt(part, 10) || 0);
+  for (let index = 0; index < Math.max(leftParts.length, rightParts.length); index += 1) {
+    const difference = (leftParts[index] || 0) - (rightParts[index] || 0);
+    if (difference !== 0) return difference;
+  }
+  return 0;
 }
 
 function isSameMajorDirectBump(packageName, targetVersion, packageJson) {
@@ -444,6 +538,14 @@ function getDirectDependencyRange(packageJson, packageName) {
     || packageJson.devDependencies?.[packageName]
     || packageJson.optionalDependencies?.[packageName]
     || null;
+}
+
+function getDirectDependencyNames(packageJson) {
+  return [
+    ...Object.keys(packageJson.dependencies || {}),
+    ...Object.keys(packageJson.devDependencies || {}),
+    ...Object.keys(packageJson.optionalDependencies || {}),
+  ];
 }
 
 function extractMajor(versionOrRange) {
